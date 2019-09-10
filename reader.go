@@ -69,6 +69,15 @@ func (f *File) readHeader() error {
 	return nil
 }
 
+func (f *File) readFileBlockHeader64() (*FileBlockHeader64, error) {
+	header := FileBlockHeader64{}
+	return &header, f.read(24, &header)
+}
+func (f *File) readFileBlockHeader32() (*FileBlockHeader32, error) {
+	header := FileBlockHeader32{}
+	return &header, f.read(20, &header)
+}
+
 // read reads the next `n` bytes into the structured `data`.
 // This function panics if byte order has not been determined yet, which should be done when initializing File.
 func (f *File) read(n int, data interface{}) error {

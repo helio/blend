@@ -128,6 +128,49 @@ func TestNewFile_headerInvalidIdentifier(t *testing.T) {
 	}
 }
 
+func TestNewFile_readExampleFirstFileHeader(t *testing.T) {
+	name := "cubus-animated.blend"
+	r, err := readExample(name)
+	if err != nil {
+		t.Fatalf("Unable to read example file '%s': %s", name, err)
+	}
+	defer r.Close()
+
+	f, err := NewFile(r)
+	if err != nil {
+		t.Fatalf("Expected nil error, got: %v", err)
+	}
+	header, err := f.readFileBlockHeader64()
+	if err != nil {
+		t.Errorf("Expected nil error, got: '%s'", err)
+	}
+	code := string(header.Code[:4])
+	expected := "REND"
+	if code != expected {
+		t.Errorf("Expected code '%s', got '%s'", expected, code)
+	}
+
+	var expectedSize uint32 = 72
+	if header.Size != expectedSize {
+		t.Errorf("Expected size '%d', got '%d'", expectedSize, header.Size)
+	}
+
+	var expectedPtr uint64 = 140732810364544
+	if header.OldMemoryAddress != expectedPtr {
+		t.Errorf("Expected old memory address '%d', got '%d'", expectedPtr, header.OldMemoryAddress)
+	}
+
+	var expectedIndex uint32 = 0
+	if header.SDNAIndex != expectedIndex {
+		t.Errorf("Expected index '%d', got '%d'", expectedIndex, header.SDNAIndex)
+	}
+
+	var expectedCount uint32 = 1
+	if header.Count != expectedCount {
+		t.Errorf("Expected count '%d', got '%d'", expectedCount, header.Count)
+	}
+}
+
 func header(pointerSize, endianness byte, version string) []byte {
 	return rawHeader("BLENDER", pointerSize, endianness, version)
 }

@@ -7,9 +7,23 @@ type FileHeader struct {
 	Version     [3]byte
 }
 
-type FileBlock struct {
+type FileBlock64 struct {
+	header *FileBlockHeader64
+	data   *FileBlockData
 }
-type FileBlockHeader struct {
+type FileBlockHeader64 struct {
+	Code             [4]byte
+	Size             uint32
+	OldMemoryAddress uint64
+	SDNAIndex        uint32
+	Count            uint32
+}
+type FileBlockHeader32 struct {
+	Code             [4]byte
+	Size             uint32
+	OldMemoryAddress uint32
+	SDNAIndex        uint32
+	Count            uint32
 }
 type FileBlockData struct {
 }
