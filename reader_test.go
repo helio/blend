@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 )
 
@@ -23,55 +24,63 @@ func TestNewFile_readExampleHeader(t *testing.T) {
 		t.Fatalf("Expected nil error, got: %v", err)
 	}
 
-	if string(f.header.Identifier[:7]) != "BLENDER" {
+	if string(f.header.Identifier[:]) != "BLENDER" {
 		t.Errorf("expected Identifier 'BLENDER', got: '%v'", f.header.Identifier)
 	}
 	if f.header.PointerSize != '-' {
 		t.Errorf("expected PointerSize 8 bytes / 64 bits ('-'), got: '%v'", f.header.PointerSize)
 	}
+	if f.pointerSize != 64 {
+		t.Errorf("expected pointerSize 64 bytes, got: '%d'", f.pointerSize)
+	}
 	if f.header.Endianness != 'v' {
 		t.Errorf("expected little endian byte order ('v'), got: '%v'", f.header.Endianness)
 	}
-	if string(f.header.Version[:3]) != "280" {
+	if string(f.header.Version[:]) != "280" {
 		t.Errorf("expected version 280, got: '%v'", f.header.Version)
 	}
 }
 
 func TestNewFile_readHeader(t *testing.T) {
 	testTable := []struct {
-		name        string
-		pointerSize byte
-		endianness  byte
-		version     string
-		order       binary.ByteOrder
+		name              string
+		pointerSize       byte
+		endianness        byte
+		version           string
+		order             binary.ByteOrder
+		parsedPointerSize uint8
 	}{
 		{
-			name:        "test 32Bit Pointer, LittleEndian, Version 280",
-			pointerSize: '_',
-			endianness:  'v',
-			version:     "280",
-			order:       binary.LittleEndian,
+			name:              "test 32Bit Pointer, LittleEndian, Version 280",
+			pointerSize:       '_',
+			endianness:        'v',
+			version:           "280",
+			order:             binary.LittleEndian,
+			parsedPointerSize: 32,
 		},
 		{
-			name:        "test 64Bit Pointer, LittleEndian, Version 280",
-			pointerSize: '-',
-			endianness:  'v',
-			version:     "280",
-			order:       binary.LittleEndian,
+			name:              "test 64Bit Pointer, LittleEndian, Version 280",
+			pointerSize:       '-',
+			endianness:        'v',
+			version:           "280",
+			order:             binary.LittleEndian,
+			parsedPointerSize: 64,
 		},
 		{
-			name:        "test 64Bit Pointer, BigEndian, Version 280",
-			pointerSize: '-',
-			endianness:  'V',
-			version:     "280",
-			order:       binary.BigEndian,
+			name:              "test 64Bit Pointer, BigEndian, Version 280",
+			pointerSize:       '-',
+			endianness:        'V',
+			version:           "280",
+			order:             binary.BigEndian,
+			parsedPointerSize: 64,
 		},
 		{
-			name:        "test 64Bit Pointer, BigEndian, Version 100",
-			pointerSize: '-',
-			endianness:  'V',
-			version:     "100",
-			order:       binary.BigEndian,
+			name:              "test 64Bit Pointer, BigEndian, Version 100",
+			pointerSize:       '-',
+			endianness:        'V',
+			version:           "100",
+			order:             binary.BigEndian,
+			parsedPointerSize: 64,
 		},
 	}
 
@@ -84,22 +93,25 @@ func TestNewFile_readHeader(t *testing.T) {
 			}
 
 			if file.header.PointerSize != f.pointerSize {
-				t.Errorf("expected '%v', got '%v'", f.pointerSize, file.header.PointerSize)
+				t.Errorf("expected pointerSize '%v', got '%v'", f.pointerSize, file.header.PointerSize)
+			}
+			if file.pointerSize != f.parsedPointerSize {
+				t.Errorf("expected parsed pointer size '%v', got '%v'", f.parsedPointerSize, file.pointerSize)
 			}
 			if file.header.Endianness != f.endianness {
-				t.Errorf("expected '%v', got '%v'", f.pointerSize, file.header.Endianness)
+				t.Errorf("expected endianness '%v', got '%v'", f.pointerSize, file.header.Endianness)
 			}
 			if file.order != f.order {
-				t.Errorf("expected '%v', got '%v'", f.order, file.order)
+				t.Errorf("expected byte order '%v', got '%v'", f.order, file.order)
 			}
-			if string(file.header.Version[:3]) != f.version {
-				t.Errorf("expected '%v', got '%v'", f.version, file.header.Version)
+			if string(file.header.Version[:]) != f.version {
+				t.Errorf("expected version '%v', got '%v'", f.version, file.header.Version)
 			}
 		})
 	}
 }
 
-func TestNewFile_readPanic(t *testing.T) {
+func TestFile_readPanic(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
 			t.Errorf("read() should panic if called before readHeader()")
@@ -144,7 +156,7 @@ func TestNewFile_readExampleFirstFileHeader(t *testing.T) {
 	if err != nil {
 		t.Errorf("Expected nil error, got: '%s'", err)
 	}
-	code := string(header.Code[:4])
+	code := string(header.Code[:])
 	expected := "REND"
 	if code != expected {
 		t.Errorf("Expected code '%s', got '%s'", expected, code)
@@ -168,6 +180,47 @@ func TestNewFile_readExampleFirstFileHeader(t *testing.T) {
 	var expectedCount uint32 = 1
 	if header.Count != expectedCount {
 		t.Errorf("Expected count '%d', got '%d'", expectedCount, header.Count)
+	}
+}
+
+func TestNewFile_readExampleAllFileBlocks(t *testing.T) {
+	name := "cubus-animated.blend"
+	r, err := readExample(name)
+	if err != nil {
+		t.Fatalf("Unable to read example file '%s': %s", name, err)
+	}
+	defer r.Close()
+
+	f, err := NewFile(r)
+	if err != nil {
+		t.Fatalf("Expected nil error, got: %v", err)
+	}
+
+	if err := f.readFileBlocks(); err != nil {
+		t.Errorf("Expected nil error, got: %v", err)
+	}
+	keys := make([]string, len(f.fileBlocks64))
+	i := 0
+	for k := range f.fileBlocks64 {
+		keys[i] = k
+		i++
+	}
+	sort.Strings(keys)
+
+	expectedKeys := []string{
+		"AC", "BR", "CA", "DATA", "DNA1",
+		"ENDB", "GLOB", "GR", "IM", "LA",
+		"LS", "MA", "ME", "OB", "REND",
+		"SC", "SN", "TEST", "WM", "WO", "WS",
+	}
+
+	if len(keys) != len(expectedKeys) {
+		t.Errorf("expected %d keys, got %d. Keys retrieved: %v", len(expectedKeys), len(keys), keys)
+	}
+	for i, k := range expectedKeys {
+		if k != keys[i] {
+			t.Errorf("expected %q at index %d, got: %q", k, i, keys[i])
+		}
 	}
 }
 

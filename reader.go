@@ -8,9 +8,12 @@ import (
 )
 
 type File struct {
-	r      io.Reader
-	header *FileHeader
-	order  binary.ByteOrder
+	r            io.Reader
+	header       *FileHeader
+	order        binary.ByteOrder
+	pointerSize  uint8
+	fileBlocks64 map[string]FileBlock64
+	fileBlocks32 map[string]FileBlock32
 }
 
 // NewFile initializes the File struct and reads the header.
@@ -21,6 +24,11 @@ func NewFile(r io.Reader) (*File, error) {
 	}
 	if err := f.readHeader(); err != nil {
 		return nil, err
+	}
+	if f.pointerSize == 64 {
+		f.fileBlocks64 = make(map[string]FileBlock64)
+	} else {
+		f.fileBlocks32 = make(map[string]FileBlock32)
 	}
 
 	return &f, nil
@@ -59,14 +67,57 @@ func (f *File) readHeader() error {
 	if err = binary.Read(buffer, order, &header); err != nil {
 		return err
 	}
-	identifier := string(header.Identifier[:7])
+	identifier := string(header.Identifier[:])
 	if identifier != "BLENDER" {
 		return errors.New("blend: invalid identifier")
+	}
+
+	f.pointerSize = 64
+	if header.PointerSize == '_' {
+		f.pointerSize = 32
 	}
 
 	f.order = order
 	f.header = &header
 	return nil
+}
+
+// readFileBlocks reads all file blocks and builds up the cache structure.
+func (f *File) readFileBlocks() error {
+	for {
+		if f.pointerSize == 64 {
+			header, err := f.readFileBlockHeader64()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					return nil
+				}
+				return err
+			}
+			data, err := readNextBytes(f.r, int(header.Size))
+			if err != nil {
+				return err
+			}
+
+			f.fileBlocks64[byteSliceToString(header.Code[:])] = FileBlock64{
+				header: header,
+				data:   data,
+			}
+		} else {
+			header, err := f.readFileBlockHeader32()
+			if err != nil {
+				return err
+			}
+			data, err := readNextBytes(f.r, int(header.Size))
+			if err != nil {
+				return err
+			}
+
+			f.fileBlocks32[byteSliceToString(header.Code[:])] = FileBlock32{
+				header: header,
+				data:   data,
+			}
+		}
+	}
 }
 
 func (f *File) readFileBlockHeader64() (*FileBlockHeader64, error) {
@@ -91,4 +142,13 @@ func (f *File) read(n int, data interface{}) error {
 	buffer := bytes.NewBuffer(binData)
 
 	return binary.Read(buffer, f.order, data)
+}
+
+func byteSliceToString(s []byte) string {
+	n := bytes.IndexByte(s, 0)
+	// if byte array doesn't contain any 0 bytes
+	if n == -1 {
+		return string(s[:])
+	}
+	return string(s[:n])
 }
