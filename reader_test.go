@@ -224,6 +224,30 @@ func TestNewFile_readExampleAllFileBlocks(t *testing.T) {
 	}
 }
 
+func TestNewFile_readExampleSDNA(t *testing.T) {
+	name := "cubus-animated.blend"
+	r, err := readExample(name)
+	if err != nil {
+		t.Fatalf("Unable to read example file '%s': %s", name, err)
+	}
+	defer r.Close()
+
+	f, err := NewFile(r)
+	if err != nil {
+		t.Fatalf("Expected nil error, got: %v", err)
+	}
+
+	if err := f.readFileBlocks(); err != nil {
+		t.Errorf("Expected nil error, got: %v", err)
+	}
+
+	sdna, err := f.readSDNA()
+	if err != nil {
+		t.Errorf("Expected nil error, got: %v", err)
+	}
+	fmt.Printf("reader_test sdna: %#v\n", sdna)
+}
+
 func header(pointerSize, endianness byte, version string) []byte {
 	return rawHeader("BLENDER", pointerSize, endianness, version)
 }

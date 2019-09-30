@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
+	"strings"
 )
 
 type File struct {
@@ -32,20 +34,6 @@ func NewFile(r io.Reader) (*File, error) {
 	}
 
 	return &f, nil
-}
-
-// readNextBytes reads number of bytes from file.
-// shamelessly stolen from https://www.jonathan-petitcolas.com/2014/09/25/parsing-binary-files-in-go.html
-func readNextBytes(r io.Reader, n int) ([]byte, error) {
-	bytes := make([]byte, n)
-
-	// FIXME: take care about `n`
-	_, err := r.Read(bytes)
-	if err != nil {
-		return bytes, err
-	}
-
-	return bytes, nil
 }
 
 // readHeader reads the first 12 bytes which represent a blender file header.
@@ -129,19 +117,95 @@ func (f *File) readFileBlockHeader32() (*FileBlockHeader32, error) {
 	return &header, f.read(20, &header)
 }
 
+func (f *File) getFileBlockData(name string) (io.Reader, error) {
+	if f.pointerSize == 64 {
+		b, ok := f.fileBlocks64[name]
+		if !ok {
+			return nil, fmt.Errorf("file block '%s' not found", name)
+		}
+		return bytes.NewReader(b.data), nil
+	}
+	b, ok := f.fileBlocks32[name]
+	if !ok {
+		return nil, fmt.Errorf("file block '%s' not found", name)
+	}
+	return bytes.NewReader(b.data), nil
+}
+
+func (f *File) readSDNA() (*StructureDNA, error) {
+	data, err := f.getFileBlockData("DNA1")
+	if err != nil {
+		return nil, err
+	}
+
+	fb := StructureDNA{}
+
+	// read initial data
+	err = read(data, 4, f.order, &fb.Identifier)
+	if err != nil {
+		return nil, fmt.Errorf("blend: unable to read sdna identifier: %w", err)
+	}
+	err = read(data, 4, f.order, &fb.NameID)
+	if err != nil {
+		return nil, fmt.Errorf("blend: unable to read sdna NameID: %w", err)
+	}
+	err = read(data, 4, f.order, &fb.NumNames)
+	if err != nil {
+		return nil, fmt.Errorf("blend: unable to read sdna NumNames: %w", err)
+	}
+
+	names := make([]string, fb.NumNames)
+	currName := strings.Builder{}
+	for namesIdx := 0; namesIdx < int(fb.NumNames); {
+		binData, err := readNextBytes(data, 1)
+		if err != nil {
+			return nil, err
+		}
+		if binData[0] == '\x00' {
+			names[namesIdx] = currName.String()
+			namesIdx++
+			currName.Reset()
+			continue
+		}
+		currName.Write(binData)
+	}
+	fb.Names = names
+
+	return &fb, nil
+}
+
 // read reads the next `n` bytes into the structured `data`.
 // This function panics if byte order has not been determined yet, which should be done when initializing File.
 func (f *File) read(n int, data interface{}) error {
 	if f.order == nil {
 		panic("blend: unable to read bytes before reading header")
 	}
-	binData, err := readNextBytes(f.r, n)
+	return read(f.r, n, f.order, data)
+}
+
+// read reads `n` bytes from reader and parses it into `data`.
+func read(r io.Reader, n int, order binary.ByteOrder, data interface{}) error {
+	binData, err := readNextBytes(r, n)
 	if err != nil {
 		return err
 	}
 	buffer := bytes.NewBuffer(binData)
 
-	return binary.Read(buffer, f.order, data)
+	return binary.Read(buffer, order, data)
+}
+
+// readNextBytes reads number of bytes from file.
+// shamelessly stolen from https://www.jonathan-petitcolas.com/2014/09/25/parsing-binary-files-in-go.html
+func readNextBytes(r io.Reader, n int) ([]byte, error) {
+	bytes := make([]byte, n)
+
+	// FIXME: take care about `n`
+	_, err := r.Read(bytes)
+	if err != nil {
+		return bytes, err
+	}
+
+	return bytes, nil
 }
 
 func byteSliceToString(s []byte) string {
